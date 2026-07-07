@@ -1,0 +1,15 @@
+# 忽略所有 APK 文件
+*.apk
+*.zip
+
+# 忽略 Python 虚拟环境目录
+.venv/
+env/
+venv/
+
+# 建议同时忽略常见的 Python 和 IDE 垃圾文件
+__pycache__/
+*.py[cod]
+*$py.class
+.idea/
+.github/
