@@ -7,6 +7,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.image import Image
 from kivy.uix.button import Button
 from kivy.uix.label import Label
+from kivy.uix.scrollview import ScrollView
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
@@ -165,7 +166,7 @@ class AnimalRecognitionApp(App):
         main_layout = BoxLayout(orientation='vertical', padding=10, spacing=8)
 
         self.title_label = Label(
-            text='Animal Recognition',
+            text='动物识别',
             font_name=FONT_NAME,
             font_size='22sp',
             bold=True,
@@ -177,26 +178,32 @@ class AnimalRecognitionApp(App):
 
         self.image_widget = Image(
             source='',
-            size_hint=(1, 0.55),
+            size_hint=(1, 0.5),
             allow_stretch=True
         )
         main_layout.add_widget(self.image_widget)
 
+        # 结果区域 - 可滚动，防止文字遮挡
+        result_scroll = ScrollView(size_hint=(1, 0.3))
         self.result_label = Label(
-            text='Click "Camera" to start',
+            text='点击「拍照」开始',
             font_name=FONT_NAME,
-            font_size='15sp',
-            size_hint=(1, 0.25),
-            halign='center',
-            valign='middle',
+            font_size='14sp',
+            size_hint_y=None,
+            height=200,
+            text_size=(Window.width - 30, None),
+            halign='left',
+            valign='top',
             color=(0.3, 0.3, 0.3, 1)
         )
-        main_layout.add_widget(self.result_label)
+        self.result_label.bind(width=lambda *x: setattr(self.result_label, 'text_size', (self.result_label.width, None)))
+        result_scroll.add_widget(self.result_label)
+        main_layout.add_widget(result_scroll)
 
         button_layout = BoxLayout(size_hint=(1, None), height=55, spacing=10)
 
         self.capture_btn = Button(
-            text='Camera',
+            text='拍照',
             font_name=FONT_NAME,
             font_size='18sp',
             background_color=(0.2, 0.6, 1, 1)
@@ -205,7 +212,7 @@ class AnimalRecognitionApp(App):
         button_layout.add_widget(self.capture_btn)
 
         self.recognize_btn = Button(
-            text='Recognize',
+            text='识别',
             font_name=FONT_NAME,
             font_size='18sp',
             background_color=(0.2, 0.8, 0.4, 1),
@@ -218,12 +225,18 @@ class AnimalRecognitionApp(App):
 
         return main_layout
 
+    def _update_result(self, text):
+        """更新结果文本并自动调整标签高度"""
+        self.result_label.text = text
+        Clock.schedule_once(lambda dt: setattr(self.result_label, 'height',
+            max(200, self.result_label.texture_size[1] + 20)), 0.05)
+
     def on_start(self):
         Clock.schedule_once(lambda dt: threading.Thread(target=self.load_model, daemon=True).start(), 0)
 
     def load_model(self):
         try:
-            Clock.schedule_once(lambda dt: setattr(self.result_label, 'text', 'Loading model...'), 0)
+            Clock.schedule_once(lambda dt: self._update_result('加载模型中...'), 0)
 
             if self.is_android:
                 import os as os_module
@@ -255,18 +268,15 @@ class AnimalRecognitionApp(App):
                 except ImportError:
                     raise RuntimeError('Desktop mode requires: pip install tflite-runtime')
 
-            mode = 'Android' if self.is_android else 'Desktop'
-            Clock.schedule_once(lambda dt: setattr(
-                self.result_label, 'text',
-                f'Model loaded! ({mode} mode)\nClick "{self.capture_btn.text}" to start'
+            mode = 'Android' if self.is_android else '桌面'
+            Clock.schedule_once(lambda dt: self._update_result(
+                f'模型加载完成！（{mode}）\n点击「拍照」开始识别'
             ), 0)
         except Exception as e:
             import traceback
             print(traceback.format_exc())
-            err_msg = f'Model load failed: {str(e)}'
-            Clock.schedule_once(lambda dt: setattr(
-                self.result_label, 'text', err_msg
-            ), 0)
+            err_msg = f'模型加载失败: {str(e)}'
+            Clock.schedule_once(lambda dt: self._update_result(err_msg), 0)
 
     def take_photo(self, instance):
         if self.is_android:
@@ -289,12 +299,12 @@ class AnimalRecognitionApp(App):
 
             android.activity.bind(on_activity_result=self._on_camera_result)
             context.startActivityForResult(intent, 0)
-            self.result_label.text = '📷 Taking photo...'
+            self._update_result('📷 拍照中...')
 
         except Exception as e:
             import traceback
             traceback.print_exc()
-            self.result_label.text = f'Camera failed: {str(e)}'
+            self._update_result(f'拍照失败: {str(e)}')
 
     def _get_android_activity(self):
         from jnius import autoclass
@@ -310,12 +320,12 @@ class AnimalRecognitionApp(App):
                 from jnius import autoclass
                 extras = intent.getExtras()
                 if extras is None or not extras.containsKey('data'):
-                    self.result_label.text = 'No image from camera'
+                    self._update_result('未获取到图片')
                     return
 
                 bitmap = extras.get('data')
                 if bitmap is None:
-                    self.result_label.text = 'No image from camera'
+                    self._update_result('未获取到图片')
                     return
 
                 # 保存缩略图到私有目录（224x224 识别足够用）
@@ -334,9 +344,9 @@ class AnimalRecognitionApp(App):
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                self.result_label.text = f'Camera result error: {str(e)}'
+                self._update_result(f'拍照结果错误: {str(e)}')
         else:
-            self.result_label.text = 'Camera cancelled'
+            self._update_result('已取消拍照')
 
     def _take_photo_desktop(self):
         """Desktop: file chooser"""
@@ -345,7 +355,7 @@ class AnimalRecognitionApp(App):
             filechooser.open_file(filters=['*.jpg', '*.png', '*.jpeg'],
                                   on_selection=self._on_file_selected)
         except Exception as e:
-            self.result_label.text = f'Select failed: {str(e)}'
+            self._update_result(f'选择失败: {str(e)}')
 
     def _on_file_selected(self, selection):
         if selection:
@@ -357,7 +367,7 @@ class AnimalRecognitionApp(App):
         self.image_widget.source = ''
         Clock.schedule_once(lambda dt: self._show_image(filename), 0.1)
         self.recognize_btn.disabled = False
-        self.result_label.text = '📸 Photo taken, click "Recognize"'
+        self._update_result('📸 已拍照，点击「识别」')
 
     def _show_image(self, filename):
         self.image_widget.source = filename
@@ -365,11 +375,11 @@ class AnimalRecognitionApp(App):
 
     def recognize_animal(self, instance):
         if not self.captured_image_path or not self.interpreter:
-            self.result_label.text = 'Please select image or wait for model loading'
+            self._update_result('请先拍照或等待模型加载')
             return
 
         try:
-            self.result_label.text = 'Recognizing...'
+            self._update_result('识别中...')
             Clock.schedule_once(lambda dt: threading.Thread(target=self._do_recognition, daemon=True).start(), 0.1)
         except Exception as e:
             self.result_label.text = f'Recognition failed: {str(e)}'
@@ -412,7 +422,9 @@ class AnimalRecognitionApp(App):
             top_indices = sorted(range(NUM_CLASSES), key=lambda i: predictions[i], reverse=True)[:5]
             results = [(str(idx), IMAGENET_LABELS.get(idx, f'class_{idx}'), float(predictions[idx])) for idx in top_indices]
 
-            display_text = 'Recognition Results:\n\n'
+            display_text = '🎯 识别结果：
+
+'
             horse_found = False
             best_result = None
 
@@ -422,26 +434,24 @@ class AnimalRecognitionApp(App):
 
                 if self.is_horse(name):
                     horse_found = True
-                    emoji = '[OK]'
+                    emoji = '✓'
                     if best_result is None or confidence > best_result[1]:
                         best_result = (translated_name, confidence)
                 else:
                     emoji = ''
 
-                display_text += f'{rank + 1}. {translated_name}\n   Confidence: {confidence:.2f}% {emoji}\n\n'
+                display_text += f'{rank + 1}. {translated_name}\n   置信度: {confidence:.2f}% {emoji}\n\n'
 
             if horse_found and best_result:
-                display_text += f'\nSuccess: {best_result[0]} (Confidence: {best_result[1]:.2f}%)'
+                display_text += f'\n✅ 检测到：{best_result[0]}（置信度：{best_result[1]:.2f}%）'
 
-            Clock.schedule_once(lambda dt: setattr(self.result_label, 'text', display_text), 0)
+            Clock.schedule_once(lambda dt: self._update_result(display_text), 0)
 
         except Exception as e:
             import traceback
             print(traceback.format_exc())
-            err_msg = f'Recognition failed: {str(e)}'
-            Clock.schedule_once(lambda dt: setattr(
-                self.result_label, 'text', err_msg
-            ), 0)
+            err_msg = f'❌ 识别失败: {str(e)}'
+            Clock.schedule_once(lambda dt: self._update_result(err_msg), 0)
 
     def is_horse(self, name):
         horse_keywords = ['sorrel', 'arabian', 'quarter_horse', 'horse']
@@ -449,28 +459,50 @@ class AnimalRecognitionApp(App):
 
     def translate_animal_name(self, name):
         translations = {
-            'sorrel': 'Horse (Sorrel)',
-            'arabian': 'Horse (Arabian)',
-            'quarter_horse': 'Horse (Quarter Horse)',
-            'horse': 'Horse',
-            'horse_cart': 'Horse Cart',
-            'hartebeest': 'Antelope',
-            'dog': 'Dog',
-            'retriever': 'Retriever Dog',
-            'shepherd': 'Shepherd Dog',
-            'cat': 'Cat',
-            'tabby': 'Tabby Cat',
-            'elephant': 'Elephant',
-            'lion': 'Lion',
-            'tiger': 'Tiger',
-            'cheetah': 'Cheetah',
-            'bear': 'Bear',
-            'polar_bear': 'Polar Bear',
-            'bird': 'Bird',
-            'peacock': 'Peacock',
-            'duck': 'Duck',
-            'fish': 'Fish',
-            'shark': 'Shark',
+            'sorrel': '🐴 马（栗色）',
+            'arabian': '🐴 马（阿拉伯马）',
+            'quarter_horse': '🐴 马（夸特马）',
+            'horse': '🐴 马',
+            'horse_cart': '🏇 马车',
+            'hartebeest': '🦌 羚羊',
+            'dog': '🐕 狗',
+            'retriever': '🐕 寻回犬',
+            'shepherd': '🐕 牧羊犬',
+            'cat': '🐱 猫',
+            'tabby': '🐱 虎斑猫',
+            'elephant': '🐘 大象',
+            'lion': '🦁 狮子',
+            'tiger': '🐯 老虎',
+            'cheetah': '🐆 猎豹',
+            'bear': '🐻 熊',
+            'polar_bear': '🐻‍❄️ 北极熊',
+            'bird': '🐦 鸟',
+            'peacock': '🦚 孔雀',
+            'duck': '🦆 鸭子',
+            'fish': '🐟 鱼',
+            'shark': '🦈 鲨鱼',
+            'cow': '🐄 牛',
+            'sheep': '🐑 羊',
+            'goat': '🐐 山羊',
+            'pig': '🐖 猪',
+            'rabbit': '🐇 兔子',
+            'squirrel': '🐿️ 松鼠',
+            'frog': '🐸 青蛙',
+            'turtle': '🐢 乌龟',
+            'snake': '🐍 蛇',
+            'dragonfly': '🪰 蜻蜓',
+            'butterfly': '🦋 蝴蝶',
+            'monkey': '🐒 猴子',
+            'gorilla': '🦍 大猩猩',
+            'panda': '🐼 熊猫',
+            'fox': '🦊 狐狸',
+            'deer': '🦌 鹿',
+            'wolf': '🐺 狼',
+            'owl': '🦉 猫头鹰',
+            'eagle': '🦅 鹰',
+            'swan': '🦢 天鹅',
+            'dolphin': '🐬 海豚',
+            'whale': '🐋 鲸鱼',
         }
 
         for key, value in translations.items():
