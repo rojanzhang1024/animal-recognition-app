@@ -36,7 +36,26 @@ if 'android' in sys.modules or os.path.exists('/sdcard/'):
     if not font_found:
         FONT_NAME = 'Roboto'
 else:
-    FONT_NAME = 'Roboto'
+    # Windows / PC 环境：尝试系统自带的中文字体
+    font_paths = [
+        'C:/Windows/Fonts/msyh.ttc',       # 微软雅黑
+        'C:/Windows/Fonts/simsun.ttc',      # 宋体
+        'C:/Windows/Fonts/simhei.ttf',      # 黑体
+        'C:/Windows/Fonts/SimHei.ttf',
+        'C:/Windows/Fonts/msyhbd.ttc',      # 微软雅黑加粗
+    ]
+    font_found = False
+    for fp in font_paths:
+        if os.path.exists(fp):
+            try:
+                LabelBase.register(name='cjkfont', fn_regular=fp)
+                FONT_NAME = 'cjkfont'
+                font_found = True
+                break
+            except:
+                continue
+    if not font_found:
+        FONT_NAME = 'Roboto'
 
 IMAGENET_LABELS = {
     # Fish / Marine
@@ -453,13 +472,13 @@ class AnimalRecognitionApp(App):
                 output_data = self.interpreter.get_tensor(output_details[0]['index'])
                 predictions = output_data[0].tolist()
 
-            # Get top 5 indices (pure Python argsort)
-            top_indices = sorted(range(NUM_CLASSES), key=lambda i: predictions[i], reverse=True)[:5]
+            # 扩大搜索范围到 top 100，确保能找到排名靠后的动物类别
+            top_indices = sorted(range(NUM_CLASSES), key=lambda i: predictions[i], reverse=True)[:100]
             # Only show known labels, skip 'class_XXX' unknowns
             results = []
             for idx in top_indices:
                 label = IMAGENET_LABELS.get(idx)
-                if label is not None:
+                if label is not None and predictions[idx] > 0.02:  # 置信度 > 2% 才展示
                     results.append((str(idx), label, float(predictions[idx])))
                 if len(results) >= 3:
                     break
