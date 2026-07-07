@@ -422,9 +422,7 @@ class AnimalRecognitionApp(App):
             top_indices = sorted(range(NUM_CLASSES), key=lambda i: predictions[i], reverse=True)[:5]
             results = [(str(idx), IMAGENET_LABELS.get(idx, f'class_{idx}'), float(predictions[idx])) for idx in top_indices]
 
-            display_text = '🎯 识别结果：
-
-'
+            display_text = '🎯 识别结果：\n\n'
             horse_found = False
             best_result = None
 
