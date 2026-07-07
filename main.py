@@ -16,10 +16,24 @@ import threading
 #from tensorflow.lite.python.interpreter import Interpreter
 
 if 'android' in sys.modules or os.path.exists('/sdcard/'):
-    try:
-        LabelBase.register(name='droidsans', fn_regular='/system/fonts/DroidSansFallback.ttf')
-        FONT_NAME = 'droidsans'
-    except:
+    # 尝试多个中文字体路径（不同 Android 版本位置不同）
+    font_paths = [
+        '/system/fonts/NotoSansSC-Regular.otf',
+        '/system/fonts/NotoSansCJK-Regular.ttc',
+        '/system/fonts/NotoSansCJKsc-Regular.otf',
+        '/system/fonts/DroidSansFallback.ttf',
+    ]
+    font_found = False
+    for fp in font_paths:
+        if os.path.exists(fp):
+            try:
+                LabelBase.register(name='cjkfont', fn_regular=fp)
+                FONT_NAME = 'cjkfont'
+                font_found = True
+                break
+            except:
+                continue
+    if not font_found:
         FONT_NAME = 'Roboto'
 else:
     FONT_NAME = 'Roboto'
@@ -285,7 +299,29 @@ class AnimalRecognitionApp(App):
             self._take_photo_desktop()
 
     def _take_photo_android(self):
-        """Android: Camera without EXTRA_OUTPUT, get bitmap from result"""
+        """Android: request camera permission, then launch camera"""
+        try:
+            from android.permissions import request_permissions, Permission, check_permission
+
+            if check_permission(Permission.CAMERA):
+                self._launch_camera()
+            else:
+                self._update_result('请求相机权限...')
+                request_permissions([Permission.CAMERA], self._camera_permission_callback)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._update_result(f'拍照失败: {str(e)}')
+
+    def _camera_permission_callback(self, permissions, grant_results):
+        """Callback after user responds to permission request"""
+        if all(grant_results):
+            self._launch_camera()
+        else:
+            self._update_result('需要相机权限才能拍照')
+
+    def _launch_camera(self):
+        """Actually launch the camera intent"""
         try:
             from jnius import autoclass
             import android.activity
@@ -294,12 +330,11 @@ class AnimalRecognitionApp(App):
             MediaStore = autoclass('android.provider.MediaStore')
             context = self._get_android_activity()
 
-            # 不传 EXTRA_OUTPUT -> 相机返回缩略图 Bitmap
             intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
 
             android.activity.bind(on_activity_result=self._on_camera_result)
             context.startActivityForResult(intent, 0)
-            self._update_result('📷 拍照中...')
+            self._update_result('拍照中...')
 
         except Exception as e:
             import traceback
@@ -367,7 +402,7 @@ class AnimalRecognitionApp(App):
         self.image_widget.source = ''
         Clock.schedule_once(lambda dt: self._show_image(filename), 0.1)
         self.recognize_btn.disabled = False
-        self._update_result('📸 已拍照，点击「识别」')
+        self._update_result('已拍照，点击「识别」')
 
     def _show_image(self, filename):
         self.image_widget.source = filename
@@ -420,18 +455,26 @@ class AnimalRecognitionApp(App):
 
             # Get top 5 indices (pure Python argsort)
             top_indices = sorted(range(NUM_CLASSES), key=lambda i: predictions[i], reverse=True)[:5]
-            results = [(str(idx), IMAGENET_LABELS.get(idx, f'class_{idx}'), float(predictions[idx])) for idx in top_indices]
+            # Only show known labels, skip 'class_XXX' unknowns
+            results = []
+            for idx in top_indices:
+                label = IMAGENET_LABELS.get(idx)
+                if label is not None:
+                    results.append((str(idx), label, float(predictions[idx])))
+                if len(results) >= 3:
+                    break
 
-            display_text = '🎯 识别结果：\n\n'
-            horse_found = False
+            display_text = '识别结果：\n\n'
+            found_animal = False
             best_result = None
 
             for rank, (id, name, score) in enumerate(results):
                 confidence = score * 100
                 translated_name = self.translate_animal_name(name)
 
-                if self.is_horse(name):
-                    horse_found = True
+                # 翻译成功（中文名 != 英文名）说明是动物
+                if translated_name != name:
+                    found_animal = True
                     emoji = '✓'
                     if best_result is None or confidence > best_result[1]:
                         best_result = (translated_name, confidence)
@@ -440,67 +483,65 @@ class AnimalRecognitionApp(App):
 
                 display_text += f'{rank + 1}. {translated_name}\n   置信度: {confidence:.2f}% {emoji}\n\n'
 
-            if horse_found and best_result:
-                display_text += f'\n✅ 检测到：{best_result[0]}（置信度：{best_result[1]:.2f}%）'
+            if found_animal and best_result:
+                display_text += f'\n检测到：{best_result[0]}（置信度：{best_result[1]:.2f}%）'
+            else:
+                display_text = '\n\n此图不是动物，请重新拍照'
 
             Clock.schedule_once(lambda dt: self._update_result(display_text), 0)
 
         except Exception as e:
             import traceback
             print(traceback.format_exc())
-            err_msg = f'❌ 识别失败: {str(e)}'
+            err_msg = f'识别失败: {str(e)}'
             Clock.schedule_once(lambda dt: self._update_result(err_msg), 0)
-
-    def is_horse(self, name):
-        horse_keywords = ['sorrel', 'arabian', 'quarter_horse', 'horse']
-        return any(keyword in name.lower() for keyword in horse_keywords)
 
     def translate_animal_name(self, name):
         translations = {
-            'sorrel': '🐴 马（栗色）',
-            'arabian': '🐴 马（阿拉伯马）',
-            'quarter_horse': '🐴 马（夸特马）',
-            'horse': '🐴 马',
-            'horse_cart': '🏇 马车',
-            'hartebeest': '🦌 羚羊',
-            'dog': '🐕 狗',
-            'retriever': '🐕 寻回犬',
-            'shepherd': '🐕 牧羊犬',
-            'cat': '🐱 猫',
-            'tabby': '🐱 虎斑猫',
-            'elephant': '🐘 大象',
-            'lion': '🦁 狮子',
-            'tiger': '🐯 老虎',
-            'cheetah': '🐆 猎豹',
-            'bear': '🐻 熊',
-            'polar_bear': '🐻‍❄️ 北极熊',
-            'bird': '🐦 鸟',
-            'peacock': '🦚 孔雀',
-            'duck': '🦆 鸭子',
-            'fish': '🐟 鱼',
-            'shark': '🦈 鲨鱼',
-            'cow': '🐄 牛',
-            'sheep': '🐑 羊',
-            'goat': '🐐 山羊',
-            'pig': '🐖 猪',
-            'rabbit': '🐇 兔子',
-            'squirrel': '🐿️ 松鼠',
-            'frog': '🐸 青蛙',
-            'turtle': '🐢 乌龟',
-            'snake': '🐍 蛇',
-            'dragonfly': '🪰 蜻蜓',
-            'butterfly': '🦋 蝴蝶',
-            'monkey': '🐒 猴子',
-            'gorilla': '🦍 大猩猩',
-            'panda': '🐼 熊猫',
-            'fox': '🦊 狐狸',
-            'deer': '🦌 鹿',
-            'wolf': '🐺 狼',
-            'owl': '🦉 猫头鹰',
-            'eagle': '🦅 鹰',
-            'swan': '🦢 天鹅',
-            'dolphin': '🐬 海豚',
-            'whale': '🐋 鲸鱼',
+            'sorrel': '马（栗色）',
+            'arabian': '马（阿拉伯马）',
+            'quarter_horse': '马（夸特马）',
+            'horse': '马',
+            'horse_cart': '马车',
+            'hartebeest': '羚羊',
+            'dog': '狗',
+            'retriever': '寻回犬',
+            'shepherd': '牧羊犬',
+            'cat': '猫',
+            'tabby': '虎斑猫',
+            'elephant': '大象',
+            'lion': '狮子',
+            'tiger': '老虎',
+            'cheetah': '猎豹',
+            'bear': '熊',
+            'polar_bear': '北极熊',
+            'bird': '鸟',
+            'peacock': '孔雀',
+            'duck': '鸭子',
+            'fish': '鱼',
+            'shark': '鲨鱼',
+            'cow': '牛',
+            'sheep': '羊',
+            'goat': '山羊',
+            'pig': '猪',
+            'rabbit': '兔子',
+            'squirrel': '松鼠',
+            'frog': '青蛙',
+            'turtle': '乌龟',
+            'snake': '蛇',
+            'dragonfly': '蜻蜓',
+            'butterfly': '蝴蝶',
+            'monkey': '猴子',
+            'gorilla': '大猩猩',
+            'panda': '熊猫',
+            'fox': '狐狸',
+            'deer': '鹿',
+            'wolf': '狼',
+            'owl': '猫头鹰',
+            'eagle': '鹰',
+            'swan': '天鹅',
+            'dolphin': '海豚',
+            'whale': '鲸鱼',
         }
 
         for key, value in translations.items():
