@@ -21,6 +21,7 @@
 | 图像处理 | Pillow |
 
 ## 项目结构
+```
 animal/ 
 ├── main.py # 应用主程序 
 ├── tflite_c_api.py # TFLite C API 封装 (Android) 
@@ -29,20 +30,25 @@ animal/
 ├── libs/android-v8/ 
 │ └── libtensorflowlite_jni.so 
 └── README.md
-
+```
 
 ## 运行方式
 
 ### 桌面端 
+```
  pip install kivy pillow 
+ 
  python main.py
-
+```
 
 ### Android 打包 
+```
  pip install buildozer 
- cd ~/animalv2 
+ 
+ cd ~/animalv2
+ 
  buildozer -v android debug
-
+```
 
 ## 使用方法
 
