@@ -34,11 +34,14 @@ animal/
 ## 运行方式
 
 ### 桌面端 
- pip install kivy pillow python main.py
+ pip install kivy pillow 
+ python main.py
 
 
 ### Android 打包 
- pip install buildozer cd ~/animalv2 buildozer -v android debug
+ pip install buildozer 
+ cd ~/animalv2 
+ buildozer -v android debug
 
 
 ## 使用方法
